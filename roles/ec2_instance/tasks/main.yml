@@ -1,0 +1,47 @@
+---
+# Sets up an EC2 VM 
+
+- debug: var=ec2_instance_cfg
+
+- name: Prep security group list
+  set_fact: sg_names="[]"
+  no_log: true
+- set_fact: sg_names="{{ ec2_instance_cfg.sg_names }}"
+  when: "ec2_instance_cfg.sg_names is defined"
+  no_log: true
+
+# Create a new security group if caller gave us sg_rules
+- block:
+  - name: Set up security group for application access
+    ec2_group:
+      state: present
+      name: "{{ ec2_instance_cfg.vm_name }}-sg"
+      region: "{{ ec2_instance_cfg.region }}"
+      vpc_id: "{{ ec2_instance_cfg.vpc_id }}"
+      description: "Security group for {{ ec2_instance_cfg.vm_name }}."
+      rules: "{{ ec2_instance_cfg.sg_rules }}"
+    register: tmp_sg
+
+  - name: Set Security group name
+    set_fact: sg_names="{{ sg_names }} + [ '{{ tmp_sg.group_id }}' ]"
+  when: "ec2_instance_cfg.sg_rules is defined"
+
+- name: Start EC2 instance
+  ec2_instance:
+    state: running
+    region: "{{ ec2_instance_cfg.region }}"
+    name: "{{ec2_instance_cfg.vm_name}}"
+    cpu_credit_specification: standard
+    image_id: "{{ ec2_instance_cfg.image_id }}"
+    instance_initiated_shutdown_behavior: stop
+    instance_type: "{{ec2_instance_cfg.instance_type}}"
+    key_name: "{{ec2_instance_cfg.ssh_key_name}}"
+    network:
+      assign_public_ip: yes
+    security_groups: "{{ sg_names }}"
+#      vpc_subnet_id: "{{vpc.subnet.id}}"
+  register: ec2_inst
+
+- set_fact: ec2_instance="{{ec2_inst}}"
+
+- debug: var=ec2_instance

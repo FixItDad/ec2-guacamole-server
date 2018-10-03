@@ -1,0 +1,22 @@
+---
+- name: Bootstrap | Check if bootstrap is needed
+  raw: stat /opt/bin/.bootstrapped
+  register: need_bootstrap
+  failed_when: false
+  changed_when: false
+
+- name: Force binaries directory for Container Linux by CoreOS
+  set_fact:
+    bin_dir: "/opt/bin"
+
+- name: Bootstrap | Run bootstrap.sh
+  script: bootstrap.sh
+  when: need_bootstrap.rc != 0
+
+- set_fact:
+    ansible_python_interpreter: "{{ bin_dir }}/python"
+
+- name: Bootstrap | Disable auto-upgrade
+  shell: "systemctl stop locksmithd.service && systemctl mask --now locksmithd.service"
+  when:
+    - not coreos_auto_upgrade

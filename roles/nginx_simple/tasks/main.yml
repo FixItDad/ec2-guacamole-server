@@ -1,0 +1,66 @@
+---
+# Install an nginx instance with a self signed certificate
+
+- name: Install nginx package
+  apt: name="{{ packages }}" state=present update_cache=yes
+  vars:
+    packages:
+    - nginx
+    - python-pip
+
+- name: Install pyOpenSSL
+  command: pip install pyOpenSSL
+
+
+- name: nginx_simple| Create NGINX TLS directory
+  file: state=directory path=/etc/nginx/ssl
+
+- name: nginx_simple| Generate DH params (can take several minutes)
+  openssl_dhparam:
+    state: present
+    path: "{{tls_dhparam}}"
+    size: "{{dhparam_size}}"
+    group: www-data
+    owner: www-data
+    mode: 0444
+
+- name: nginx_simple| Generate private key
+  openssl_privatekey:
+    state: present
+    path: "{{ tls_privatekey }}"
+    group: www-data
+    owner: www-data
+    mode: 0400
+
+- name: nginx_simple| Generate CSR
+  openssl_csr:
+    state: present
+    path: "{{tls_csr}}"
+    privatekey_path: "{{tls_privatekey}}"
+    common_name: "{{nginx_simple.commonname}}"
+    country_name: "{{nginx_simple.country}}"
+    email_address: "{{nginx_simple.email | default('') }}"
+    locality_name: "{{nginx_simple.locale}}"
+    organization_name: "{{nginx_simple.org}}"
+    organizational_unit_name: "{{nginx_simple.unit}}"
+    state_or_province_name: "{{nginx_simple.state}}"
+    subject_alt_name: "DNS:{{nginx_simple.commonname}}"
+    group: www-data
+    owner: www-data
+    mode: 0400
+
+- name: nginx_simple| Generate self signed certificate
+  openssl_certificate:
+    state: present
+    path: "{{tls_cert}}"
+    privatekey_path: "{{tls_privatekey}}"
+    csr_path: "{{tls_csr}}"
+    provider: selfsigned
+    group: www-data
+    owner: www-data
+    mode: 0444
+
+- name: nginx_simple| Install configuration
+  copy: src="{{nginx_conf}}" dest=/etc/nginx/nginx.conf
+  notify: restart nginx
+

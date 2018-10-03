@@ -1,0 +1,12 @@
+Name:   guacamole-server
+Version:        {{ guacamole_version }}
+Release:        {{ ansible_date_time.date |regex_replace('-','') }}
+License:        Apache
+Group:          net
+Provides:       guacamole-server
+Requires:       libc6, libssl1.0.0, libfreerdp-cache1.1, libfreerdp-client1.1
+Summary:        Apache Guacamole remote desktop daemon.
+
+%description
+Remote desktop inferface daemon
+

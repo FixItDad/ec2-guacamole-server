@@ -1,0 +1,260 @@
+
+# Build a simple Apache Guacamole server in AWS EC2.
+# This is currently suitable for a small number of users or proof of concept
+
+# This first play creates TLS crypto artifacts locally to be uploaded later and then
+# launches an Ubuntu VM in AWS using an AWS supplied image. The new VM is added
+# to the Ansible inventory
+- hosts: localhost
+  vars:
+    cfg_instance:
+      vm_name: "{{prefix}}-guacamole"
+      instance_type: "{{guacamole_server_type}}"
+      sg_rules:
+        - proto: tcp
+          ports: [22]
+          cidr_ip: "{{allow_ssh_cidr}}"
+          rule_desc: "Allow SSH from restricted IP range"
+        - proto: tcp
+          ports: [443]
+          cidr_ip: 0.0.0.0/0
+          rule_desc: "Allow HTTPS from anywhere"
+
+  tasks:
+
+  - name: Get AWS default configuration
+    include_vars: file=aws_default_config.yml name=cfg_aws
+
+  - name: Find Ubuntu AMI
+    ec2_ami_facts:
+      filters:
+        state: [ "available" ]
+        owner-id: [ "513442679011" ]
+        architecture: [ "x86_64" ]
+        virtualization-type: [ "hvm" ]
+        description: "Canonical, Ubuntu, 16.04 LTS,*"
+        root-device-type: "ebs"
+    register: tmp_amis
+
+  - name: Find latest Ubuntu image
+    set_fact: ec2_ami="{{ tmp_amis.images |sort(reverse=True, attribute='name') |first }}"
+  - set_fact: 
+      cfg_ami:
+        image_id: "{{ec2_ami.image_id}}"
+
+
+  - name: Create EC2 instance
+    import_role:
+      name: ec2_instance
+    vars:
+      ec2_instance_cfg: "{{cfg_aws |combine(cfg_instance, cfg_ami) }}"
+
+  - name: Save instance information for server
+    set_fact: 
+      instance_id: "ec2_instance.instances[0].instance_id"
+      instance_dns_name: "{{ ec2_instance.instances[0].public_dns_name }}"
+
+  - name: Add VM to inventory
+    add_host:
+      name: "guacamole-server"
+      groups: "aws"
+      ansible_host: "{{ instance_dns_name }}"
+
+
+# This second play just installs a minimal python environment for Ansible
+- hosts: guacamole-server
+  gather_facts: no
+  become: yes
+
+  tasks:
+  - import_role:
+      name: bootstrap_os
+    vars:
+      bootstrap_os: "ubuntu"
+   
+
+# The third play installs and configures: the Guacamole software (guacd and the web interface),
+# the Postgres database for Guacamole, and the NGINX reverse proxy.
+- hosts: guacamole-server
+  become: yes
+  become_user: root
+
+  handlers:
+  - name: restart tomcat8
+    service: name=tomcat8 state=restarted
+  - name: restart guacd
+    service: name=guacd state=restarted
+  - name: restart nginx
+    service: name=nginx state=restarted
+
+  tasks:
+  - name: Get server package filenames
+    find:
+      paths: pkgs
+      patterns: "guacamole-server_{{guacamole_version}}-*_amd64.deb"
+    register: pkg_files
+    delegate_to: localhost
+
+  - name: Get latest server package
+    set_fact: server_pkg="{{ pkg_files.files |sort(reverse=True, attribute='path') |first }}"
+  - set_fact: server_pkg="{{ server_pkg.path | regex_replace('^.*/','') }}"
+
+  - name: Push guacamole-server package
+    copy:  src="pkgs/{{server_pkg}}" dest=/tmp
+
+  - name: Install dependencies
+    apt: name="{{ packages }}" state=present update_cache=yes
+    when: (ansible_pkg_mgr == "apt")
+    vars:
+      packages:
+      - tomcat8
+      - libcairo2
+      - libpng12-0
+      - libossp-uuid16
+      - libavcodec-ffmpeg56
+      - libavutil-ffmpeg54
+      - libswscale-ffmpeg3
+      - libfreerdp-core1.1
+      - libpango1.0-0
+      - libssh2-1
+      - libvncserver1
+      - libpulse0
+      - libssl1.0.0
+      - libvorbis0a
+      - libwebp5
+      - libjpeg-turbo8
+      - postgresql
+      - libpostgresql-jdbc-java
+      - python-psycopg2
+      # Add these to package dependencies
+      - libfreerdp-cache1.1
+      - libfreerdp-client1.1
+
+  - name: create guacd group
+    group: state=present name=guacd system=yes
+
+  - name: create guacd user
+    user:
+      state: present
+      name: guacd
+      system: yes
+      shell: /bin/false
+      home: /usr/local/share/guacamole
+      create_home: yes
+  - name: guacd home dir
+    file: state=directory mode=0700 path=/usr/local/share/guacamole
+
+  - name: Install server package
+    apt: deb="/tmp/{{ server_pkg }}"
+  - name: Update guacamole init.d file
+    copy: src=files/guacd dest=/etc/init.d mode=0755
+  - name: Set to autostart
+    service: name=guacd enabled=yes
+
+
+  - name: Create extension install directory
+    file: state=directory path="{{item}}"
+    with_items:
+      - /etc/guacamole/extensions
+      - /etc/guacamole/lib
+
+  - name: Install JDBC extension
+    unarchive: src="pkgs/guacamole-auth-jdbc-{{guacamole_version}}.tar.gz" dest=/tmp
+  - command: mv "/tmp/guacamole-auth-jdbc-{{guacamole_version}}/postgresql/guacamole-auth-jdbc-postgresql-{{guacamole_version}}.jar" /etc/guacamole/extensions/
+  - file: state=link src=/usr/share/java/postgresql.jar dest=/etc/guacamole/lib/postgresql.jar
+
+  - name: Update system library cache
+    shell: ldconfig
+
+
+  - name: database | Create Guacamole database
+    become_user: postgres
+    postgresql_db: 
+      name: guacamole_db 
+
+  - name: database | create guacamole schema
+    shell: cat /tmp/guacamole-auth-jdbc-{{guacamole_version}}/postgresql/schema/*.sql | psql -d guacamole_db -f -
+    become: yes
+    become_user: postgres
+
+  - set_fact: pw_guacamole_user="{{lookup('password', 'genpw-guacamole_user encrypt=') }}"
+  - name: database | Create Guacamole user
+    become_user: postgres
+    postgresql_user:
+      state: present
+      db: guacamole_db
+      name: guacamole_user
+      password: "{{pw_guacamole_user}}"
+  - name: database | Grant table privileges
+    become_user: postgres
+    postgresql_privs:
+      state: present
+      role: guacamole_user
+      database: guacamole_db
+      type: table
+      objs: ALL_IN_SCHEMA
+      privs: "SELECT,INSERT,UPDATE,DELETE"
+  - name: database | Grant sequence privileges
+    become_user: postgres
+    postgresql_privs:
+      state: present
+      role: guacamole_user
+      database: guacamole_db
+      type: sequence
+      objs: ALL_IN_SCHEMA
+      privs: "SELECT,USAGE"
+     
+
+  - name: Push guacamole-client package to Tomcat
+    copy: src="pkgs/guacamole-{{ guacamole_version }}.war" dest=/var/lib/tomcat8/webapps/
+    notify: restart tomcat8
+
+  - name: create guacamole-web group
+    group: state=present name=guacamole-web system=yes
+
+  - name: add tomcat user to gaucamole-web group
+    user: name=tomcat8 append=yes groups=guacamole-web
+
+
+  - name: create Guacamole config file directory
+    file: state=directory path=/etc/guacamole mode=755
+
+# Maybe delete this. We don't need to add users here since we are using database auth.
+  - name: Install "empty" user mapping. Users are defined in the database.
+    copy: src="{{item}}" dest=/etc/guacamole group=guacamole-web mode=0640
+    with_items:
+      - user-mapping.xml
+    notify: 
+      - restart guacd
+      - restart tomcat8
+
+  - name: Install guacamole.properties
+    template: src="{{item}}.j2" dest="/etc/guacamole/{{item}}" group=guacamole-web mode=0640
+    with_items:
+      - guacamole.properties
+    notify: 
+      - restart guacd
+      - restart tomcat8
+
+
+  - name: Allow database access for guacamole_user
+    blockinfile:
+      path: /etc/postgresql/9.5/main/pg_hba.conf
+      state: present
+      insertafter: "^# TYPE *DATABASE  *USER  *ADDRESS  *METHOD"
+      marker: "# {mark} ANSIBLE MANGED BLOCK guacamole-server"
+      block: |
+        local all "guacamole_user" md5
+        host all "guacamole_user" 127.0.0.1/32 md5
+
+
+  - name: Install NGINX
+    import_role:
+      name: nginx_simple
+    vars:
+      nginx_simple: "{{tls_information}}"
+          
+
+  - name: nginx | Install configuration
+    copy: src=files/nginx.conf dest=/etc/nginx/nginx.conf
+    notify: restart nginx

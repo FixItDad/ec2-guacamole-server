@@ -1,0 +1,158 @@
+
+- hosts: localhost
+  vars:
+    cfg_instance:
+      vm_name: "{{prefix}}-build"
+      instance_type: t2.small
+      sg_rules:
+        - proto: tcp
+          ports: [22]
+          cidr_ip: "{{allow_ssh_cidr}}"
+          rule_desc: "Allow SSH from limited IPs"
+      
+  tasks:
+  - name: Get AWS default configuration
+    include_vars: file=aws_default_config.yml name=cfg_aws
+
+
+  - name: Find Ubuntu AMI
+    ec2_ami_facts:
+      filters:
+        state: [ "available" ]
+        owner-id: [ "513442679011" ]
+        architecture: [ "x86_64" ]
+        virtualization-type: [ "hvm" ]
+        description: "Canonical, Ubuntu, 16.04 LTS,*"
+        root-device-type: "ebs"
+    register: tmp_amis
+
+  - name: Find latest Ubuntu image
+    set_fact: ec2_ami="{{ tmp_amis.images |sort(reverse=True, attribute='name') |first }}"
+  - set_fact: 
+      cfg_ami:
+        image_id: "{{ec2_ami.image_id}}"
+
+
+  - name: 
+    include_tasks: ec2_instance.yml
+    vars:
+      cfg_ec2: "{{cfg_aws |combine(cfg_instance, cfg_ami) }}"
+
+  - name: Save instance ID for decommissioning server
+    set_fact: build_instance_id="ec2_instance.instances[0].instance_id"
+
+  - name: Add VM to inventory
+    add_host:
+      name: "guacamole-build"
+      groups: "aws"
+      ansible_host: "{{ ec2_instance.instances[0].public_dns_name }}"
+
+
+- hosts: guacamole-build
+  gather_facts: no
+
+  tasks:
+  - name: Bootstrap | Install python 2.x
+    raw:
+      apt-get update && \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y python-minimal
+    become: true
+
+  - set_fact:
+      ansible_python_interpreter: "/usr/bin/python"
+    tags:
+      - facts
+
+
+- hosts: guacamole-build
+
+  vars:
+    guacamole_server_src_name: "guacamole-server-{{guacamole_version}}.tar.gz"
+    guacamole_server_src_url: "http://apache.org/dyn/closer.cgi?action=download&filename=guacamole/{{guacamole_version}}/source/{{guacamole_server_src_name}}"
+    guacamole_build_dir: "/home/ubuntu/guacamole-server-{{guacamole_version}}"
+
+
+    guacamole_dependencies_apt:
+    - libcairo2-dev
+    - libpng-dev
+    - libossp-uuid-dev
+    - libavcodec-dev
+    - libavutil-dev
+    - libswscale-dev
+    - libfreerdp-dev
+    - libpango1.0-dev
+    - libssh2-1-dev
+    - libvncserver-dev
+    - libpulse-dev
+    - libssl-dev
+    - libvorbis-dev
+    - libwebp-dev
+    # NOT supporting telnet
+
+  tasks:
+  - name: Install dependencies APT
+    apt: name={{item}} state=present update_cache=yes
+    when: (ansible_pkg_mgr == "apt")
+    with_items:
+      # checkinstall is used to generate .deb and .rpm packages
+      - checkinstall
+      - rpm
+      - "{{guacamole_dependencies_apt}}"
+      # The fast JPEG libraries differ between Debian and Ubuntu
+      - "{{'libjpeg62-turbo-dev' if ansible_distribution == 'Debian' else 'libjpeg-turbo8-dev'}}"
+    become: true
+
+  - name: Get server source code
+    get_url: url="{{guacamole_server_src_url}}" dest="/tmp/{{guacamole_server_src_name}}"
+
+  - name: Unarchive source
+    unarchive:
+      src: "/tmp/{{guacamole_server_src_name}}"
+      dest: "/home/ubuntu"
+      remote_src: yes
+
+  - name: Autoconfigure
+    shell: ./configure --with-init-dir=/etc/init.d >/tmp/guacamole-config.log 2>&1
+    args:
+      chdir: "{{guacamole_build_dir}}"
+
+  - name: Build
+    shell: make >/tmp/guacamole-make.log
+    args:
+      chdir: "{{guacamole_build_dir}}"
+
+  - name: Install package information
+    template: 
+      src: files/guacamole-server.spec.j2 
+      dest: "{{guacamole_build_dir}}/guacamole-server.spec"
+
+  - name: Get target package name
+    set_fact: 
+      deb_name="guacamole-server_{{guacamole_version}}-{{ ansible_date_time.date |regex_replace('-','') }}_amd64.deb"
+
+  - name: Generate Debian install package
+    shell: checkinstall --install=no --fstrans -D --spec guacamole-server.spec --default make install
+    args:
+      chdir: "{{guacamole_build_dir}}"
+    become: true
+
+# RPM generation via checkinstall is not working
+#  - name: Create directory needed for RPM generation
+#    file: state=directory path=/root/rpmbuild/SOURCES
+#    become: true
+#  - name: Generate RPM install package
+#    shell: checkinstall --install=no --fstrans -R --spec guacamole-server.spec --default make install
+#    args:
+#      chdir: "{{guacamole_build_dir}}"
+#    become: true
+
+  - name: purge old install package
+    file: state=absent path="pkgs/{{deb_name}}"
+    delegate_to: localhost
+
+  - name: Get .deb package
+    fetch: 
+      src: "{{guacamole_build_dir}}/{{deb_name}}"
+      dest: pkgs/
+      flat: yes
+

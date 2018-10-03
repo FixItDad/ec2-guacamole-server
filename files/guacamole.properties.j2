@@ -1,0 +1,93 @@
+
+#    Guacamole - Clientless Remote Desktop
+#    Copyright (C) 2010  Michael Jumper
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU Affero General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU Affero General Public License for more details.
+#
+#    You should have received a copy of the GNU Affero General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+# Hostname and port of guacamole proxy
+guacd-hostname: localhost
+guacd-port:     4822
+
+# Auth provider class (authenticates user/pass combination, needed if using the provided login screen)
+auth-provider: net.sourceforge.guacamole.net.basic.BasicFileAuthenticationProvider
+basic-user-mapping: /etc/guacamole/user-mapping.xml
+
+# See https://guacamole.apache.org/doc/gug/jdbc-auth.html for more information
+# on the following properties
+
+# PostgreSQL properties
+postgresql-hostname: localhost
+postgresql-port: 5432
+postgresql-database: guacamole_db
+postgresql-username: guacamole_user
+postgresql-password: {{pw_guacamole_user}}
+
+# Enforce complex passwords
+postgresql-user-password-min-length: 12
+postgresql-user-password-require-multiple-case: true
+postgresql-user-password-require-symbol: true
+postgresql-user-password-require-digit: true
+postgresql-user-password-prohibit-username: true
+
+# Other password policies
+postgresql-user-password-min-age: 1
+postgresql-user-password-max-age: 90
+postgresql-user-password-history-size: 6
+
+
+# Restrict concurrent use of connections or connection groups. These
+# properties are not required, but with the above properties in place,
+# users attempting to use a connection or group that is already in use
+# will be denied access. By default, concurrent access is allowed.
+#
+# postgresql-default-max-connections: 1
+# postgresql-default-max-group-connections: 1
+
+# Concurrent access can also be restricted such that a particular user
+# may only use a connection or group a certain number of times. By
+# default, per-user concurrent use is limited for connection groups
+# (to avoid allowing a single user to exhaust the contents of the
+# group) but otherwise unrestricted. This default behavior can be
+# modified through guacamole.properties or the per-connection settings
+# exposed in the administrative interface:
+#
+# postgresql-default-max-connections-per-user: 0
+# postgresql-default-max-group-connections-per-user: 0
+
+# If you wish to impose an absolute limit on the number of connections
+# that can be established through Guacamole, ignoring which users or
+# connections are involved, this can be done as well. By default,
+# Guacamole will impose no such limit:
+#
+# postgresql-absolute-max-connections: 0
+
+
+# By default, users will be allowed access to Guacamole as long as they
+# are authenticated by at least one extension. If database
+# authentication is in use, and a user is not associated with the
+# database, then that user will be allowed access to Guacamole if
+# another extension grants this access, and will be provided with a
+# view of the data exposed by other extensions for that user account.
+#
+# In some situations, such as when combining LDAP with a database, it
+# would be preferable to let the database have the last word regarding
+# whether a user should be allowed into the system: restricting access
+# to only those users which exist in the database, and explicitly
+# denying authentication through all other means unless that user has
+# been associated with the database as well. This behavior can be forced
+# by setting properties which declare that database user accounts are
+# required:
+#
+# postgresql-user-required: true

@@ -1,0 +1,10 @@
+
+
+[aws]
+# Add a dummy client server to have something in this group
+guac-client
+
+[aws:vars]
+ansible_ssh_user= ubuntu
+
+[all:vars]

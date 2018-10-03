@@ -1,0 +1,31 @@
+---
+# defaults file for nginx_simple
+
+# defaults for user specified info
+nginx_simple:
+  # commonname is your server name
+  commonname: myserver.mydomain.com
+  org: MyOrgName
+  unit: MyOrgUnitName
+  # country should be the ISO 2 letter abbreviation
+  country: US
+  # Do not abbreviate state and locale
+  state: MyStateProvince
+  locale: MyCityLocale
+  email: ""
+
+
+
+# Default nginx configuration
+nginx_conf: files/nginx.conf
+
+# filenames of the TLS artifacts to generate
+tls_privatekey: "/etc/nginx/ssl/server.key"
+tls_csr: "/etc/nginx/ssl/server.csr"
+tls_cert: "/etc/nginx/ssl/server.pem"
+tls_dhparam: "/etc/nginx/ssl/dhparams.pem"
+
+
+# Diffie Hellman parameter size. 2048 is considered safe except from nation 
+# state attackers (in 2018). Computation time increases dramatically for 4096.
+dhparam_size: 2048
