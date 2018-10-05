@@ -94,6 +94,7 @@
       patterns: "guacamole-server_{{guacamole_version}}-*_amd64.deb"
     register: pkg_files
     delegate_to: localhost
+    become: no
 
   - name: Get latest server package
     set_fact: server_pkg="{{ pkg_files.files |sort(reverse=True, attribute='path') |first }}"

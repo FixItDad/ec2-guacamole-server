@@ -3,16 +3,16 @@
 ansible_ssh_private_key_file: /home/myuser/.aws/sshprivate.pem
 
 # AWS object name prefix
-prefix = devVDI
+prefix: devVDI
 
 # Network to allow SSH access. 
-allow_ssh_cidr = 192.168.1.1/32
+allow_ssh_cidr: 192.168.1.1/32
 
 # guacamole server instance type (size)
 # Scale this based on number of users / load.
 # Playing a small resolution Youtube video on one RDP client 
 # was taking about 60% of CPU of a t2.small.
-guacamole_server_type = t2.small
+guacamole_server_type: t2.small
 
 # TLS certificate info
 tls_information:
@@ -26,7 +26,7 @@ tls_information:
 
 # Current version of Guacamole. 
 # This is used in URLs to pull appropriate package names.
-guacamole_version = 0.9.14
+guacamole_version: 0.9.14
 
 # Password for devtest user on devtest VM. Only needed if you are using the
 # devtest.yml playbook.
