@@ -22,9 +22,6 @@
 
   tasks:
 
-  - name: Get AWS default configuration
-    include_vars: file=aws_default_config.yml name=cfg_aws
-
   - name: Find Ubuntu AMI
     ec2_ami_facts:
       filters:
@@ -259,3 +256,6 @@
   - name: nginx | Install configuration
     copy: src=files/nginx.conf dest=/etc/nginx/nginx.conf
     notify: restart nginx
+
+  - name: Your Server has been created
+    debug msg="Immediately browse to \nhttps://{{instance_dns_name}}/guacamole/\nLog in as guacadmin (password is the same as the username).\nClick on 'guacadmin' in the top right and select settings.\nClick the Preferences tab. Use the Change password sections to change the password.\nThis is an Internet facing interface so make it a strong one."

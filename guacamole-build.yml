@@ -11,10 +11,6 @@
           rule_desc: "Allow SSH from limited IPs"
       
   tasks:
-  - name: Get AWS default configuration
-    include_vars: file=aws_default_config.yml name=cfg_aws
-
-
   - name: Find Ubuntu AMI
     ec2_ami_facts:
       filters:
